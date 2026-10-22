@@ -466,8 +466,10 @@ esp_err_t cover_controller_start(const cover_controller_config_t *cfg, cover_sta
     }
 
     if (s.sim_active) {
+        /* Simulated cover starts on the OPEN limit (unless a stopped position was restored),
+         * so the position is measured at boot instead of unknown. */
         sim_plant_init(&s.sim, cfg->sim_open_ms, cfg->sim_close_ms, cfg->sim_limit_open, cfg->sim_limit_closed,
-                       restored >= 0 ? restored : 5000);
+                       restored >= 0 ? restored : COVER_POS_OPEN);
     }
 
     sample_inputs(now, true);
