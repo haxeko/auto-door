@@ -1,0 +1,285 @@
+menu "Auto-door: device profile"
+
+    choice APP_DEVICE_PROFILE
+        prompt "Device profile"
+        default APP_DEVICE_CURTAIN
+        help
+            Only the curtain / blind profile is implemented. Motorised doors and
+            electric locks need different Matter device types and different
+            safety logic; see docs/EXTENDING.md for the planned extension points.
+
+        config APP_DEVICE_CURTAIN
+            bool "Curtain / blind (Matter Window Covering 0x0202, Lift + PositionAwareLift)"
+    endchoice
+
+    choice COVER_PRODUCT
+        prompt "Window covering product type"
+        default COVER_PRODUCT_ROLLER_SHADE
+        depends on APP_DEVICE_CURTAIN
+        help
+            Sets the Matter Type / EndProductType attributes. Controllers use them
+            for icons and wording only; the control logic is identical.
+
+        config COVER_PRODUCT_ROLLER_SHADE
+            bool "Roller shade (rem cuon)"
+        config COVER_PRODUCT_CURTAIN_CENTRAL
+            bool "Drapery, central opening (rem keo 2 canh)"
+        config COVER_PRODUCT_CURTAIN_LEFT
+            bool "Drapery, lateral left (rem keo 1 canh trai)"
+        config COVER_PRODUCT_CURTAIN_RIGHT
+            bool "Drapery, lateral right (rem keo 1 canh phai)"
+        config COVER_PRODUCT_ROLLER_SHUTTER
+            bool "Roller shutter (cua cuon)"
+    endchoice
+
+endmenu
+
+menu "Auto-door: cover hardware"
+
+    config COVER_SIMULATION
+        bool "Simulation mode (motor outputs are NEVER driven)"
+        default y
+        help
+            Default and recommended until the real board is known. The motor and
+            limit switches are simulated in software; no motor GPIO is configured.
+            Button / obstacle / fault input GPIOs are still read if you set them,
+            so local buttons can be tested safely.
+
+    config COVER_SIM_OPEN_MS
+        int "Simulated full travel time closed -> open (ms)"
+        depends on COVER_SIMULATION
+        range 1000 600000
+        default 15000
+
+    config COVER_SIM_CLOSE_MS
+        int "Simulated full travel time open -> closed (ms)"
+        depends on COVER_SIMULATION
+        range 1000 600000
+        default 16000
+
+    config COVER_SIM_LIMIT_OPEN
+        bool "Simulate an OPEN limit switch"
+        depends on COVER_SIMULATION
+        default y
+
+    config COVER_SIM_LIMIT_CLOSED
+        bool "Simulate a CLOSED limit switch"
+        depends on COVER_SIMULATION
+        default y
+
+    menu "Motor outputs (power stage, two direction inputs)"
+        depends on !COVER_SIMULATION
+
+        config COVER_GPIO_OUT_OPEN
+            int "GPIO for the OPEN direction output (-1 = not set)"
+            range -1 30
+            default -1
+            help
+                Drives the power stage input that runs the motor towards OPEN.
+                Strapping, flash, USB-JTAG and console pins are refused at runtime.
+
+        config COVER_GPIO_OUT_CLOSE
+            int "GPIO for the CLOSE direction output (-1 = not set)"
+            range -1 30
+            default -1
+
+        config COVER_OUT_ACTIVE_HIGH
+            bool "Outputs are active high (1 = energise)"
+            default y
+            help
+                Must match the relay driver / H-bridge input. The power stage MUST
+                have external resistors holding both inputs inactive while the
+                ESP32-C6 is in reset (its GPIOs are not driven then).
+    endmenu
+
+    menu "Inputs (-1 = not present)"
+
+        config COVER_GPIO_BTN_OPEN
+            int "OPEN button GPIO"
+            range -1 30
+            default -1
+        config COVER_GPIO_BTN_CLOSE
+            int "CLOSE button GPIO"
+            range -1 30
+            default -1
+        config COVER_GPIO_BTN_STOP
+            int "STOP button GPIO"
+            range -1 30
+            default -1
+        config COVER_GPIO_BTN_FUNC
+            int "Function button GPIO (commissioning window / factory reset)"
+            range -1 30
+            default -1
+            help
+                On ESP32-C6-DevKitC-1 the BOOT button is GPIO9, a strapping pin.
+                Using it requires COVER_ALLOW_STRAPPING_INPUTS. Do not hold it
+                during reset (that enters the ROM download mode).
+        config COVER_BTN_ACTIVE_HIGH
+            bool "Buttons are active high"
+            default n
+            help
+                Default: button connects the GPIO to GND (active low).
+        config COVER_BTN_INTERNAL_PULL
+            bool "Enable internal pull resistor for buttons"
+            default y
+
+        config COVER_GPIO_LIMIT_OPEN
+            int "OPEN limit switch GPIO"
+            range -1 30
+            default -1
+            depends on !COVER_SIMULATION
+        config COVER_GPIO_LIMIT_CLOSED
+            int "CLOSED limit switch GPIO"
+            range -1 30
+            default -1
+            depends on !COVER_SIMULATION
+        config COVER_LIMIT_ACTIVE_HIGH
+            bool "Limit switches are active high"
+            default y
+            help
+                Recommended wiring: normally-closed contact to GND with a pull-up.
+                The input then reads high when the limit is reached OR when the
+                wire is broken, which stops the motor (fail safe).
+        config COVER_LIMIT_INTERNAL_PULL
+            bool "Enable internal pull resistor for limit switches"
+            default y
+
+        config COVER_GPIO_OBSTACLE
+            int "Obstacle / safety edge input GPIO"
+            range -1 30
+            default -1
+        config COVER_OBSTACLE_ACTIVE_HIGH
+            bool "Obstacle input is active high"
+            default y
+        config COVER_GPIO_DRIVER_FAULT
+            int "Power stage fault input GPIO"
+            range -1 30
+            default -1
+        config COVER_DRIVER_FAULT_ACTIVE_HIGH
+            bool "Driver fault input is active high"
+            default n
+            help
+                Many H-bridge drivers have an open-drain, active-low nFAULT pin.
+        config COVER_SENSOR_INTERNAL_PULL
+            bool "Enable internal pull resistor for obstacle / fault inputs"
+            default y
+
+        config COVER_ALLOW_STRAPPING_INPUTS
+            bool "Allow strapping pins for INPUTS (never for outputs)"
+            default n
+    endmenu
+
+endmenu
+
+menu "Auto-door: motion timing and protection"
+
+    config COVER_DEADTIME_MS
+        int "Dead time: motor off before any start / reversal (ms)"
+        range 100 10000
+        default 500
+        help
+            Both outputs are off for at least this time between two runs. Use the
+            value required by the motor / relay datasheet (AC tubular motors and
+            capacitor-run motors typically need >= 500 ms).
+
+    config COVER_MAX_RUN_UNCAL_MS
+        int "Maximum run time when not calibrated (ms)"
+        range 1000 600000
+        default 60000
+        help
+            Also the run time used to reach an end WITHOUT a limit switch when not
+            calibrated. Must be longer than the real full travel.
+
+    config COVER_TIMEOUT_MARGIN_PCT
+        int "Run timeout margin over calibrated travel time (%)"
+        range 5 200
+        default 20
+
+    config COVER_END_OVERRUN_PCT
+        int "Extra run to an end WITHOUT limit switch (% of full travel)"
+        range 0 50
+        default 5
+        help
+            Only valid for motors with their own internal end stops.
+
+    config COVER_MIN_TRAVEL_MS
+        int "Minimum plausible full travel time (ms)"
+        range 200 60000
+        default 1000
+
+    config COVER_DEFAULT_OPEN_MS
+        int "Preset travel time closed -> open (ms, 0 = none)"
+        range 0 600000
+        default 0
+        help
+            Used only if no calibration is stored in NVS.
+
+    config COVER_DEFAULT_CLOSE_MS
+        int "Preset travel time open -> closed (ms, 0 = none)"
+        range 0 600000
+        default 0
+
+    config COVER_CONTROL_PERIOD_MS
+        int "Control loop period (ms)"
+        range 5 50
+        default 10
+
+    config COVER_BTN_DEBOUNCE_MS
+        int "Button debounce (ms)"
+        range 5 500
+        default 30
+
+    config COVER_SENSOR_DEBOUNCE_MS
+        int "Limit / obstacle / fault input debounce (ms)"
+        range 0 500
+        default 20
+
+    config COVER_POS_REPORT_STEP
+        int "Position report step while moving (1/100 %)"
+        range 10 2000
+        default 100
+
+    config COVER_GOTO_TOLERANCE
+        int "Go-to tolerance (1/100 %)"
+        range 0 500
+        default 50
+
+    config COVER_RESTORE_POSITION
+        bool "Restore last stopped position after reboot (as estimate)"
+        default y
+        help
+            Only a position saved after a clean stop is restored. If the device
+            was reset or lost power while moving, the position is reported as
+            unknown. The cover is never moved automatically to find it.
+
+endmenu
+
+menu "Auto-door: buttons and commissioning"
+
+    config COVER_FUNC_COMMISSION_HOLD_MS
+        int "Function button hold time to open the commissioning window (ms)"
+        range 1000 20000
+        default 3000
+
+    config COVER_FUNC_RESET_HOLD_MS
+        int "Function button hold time for factory reset (ms)"
+        range 5000 60000
+        default 10000
+        help
+            Must be longer than the commissioning hold time.
+
+    config COVER_CAL_COMBO_HOLD_MS
+        int "OPEN+CLOSE hold time to start calibration (ms)"
+        range 2000 30000
+        default 5000
+
+    config COVER_COMMISSIONING_WINDOW_S
+        int "Commissioning window opened by the button (s)"
+        range 180 900
+        default 300
+
+    config COVER_FACTORY_RESET_CLEARS_CALIBRATION
+        bool "Factory reset also erases calibration and saved position"
+        default n
+
+endmenu
