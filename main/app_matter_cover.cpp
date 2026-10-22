@@ -31,6 +31,7 @@
 #include <esp_matter.h>
 #include <freertos/FreeRTOS.h>
 
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <app/clusters/window-covering-server/window-covering-server.h>
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
